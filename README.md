@@ -63,3 +63,17 @@ async function callZhipuV4() {
 }
 
 callZhipuV4();
+
+
+
+
+
+{
+  "rewrites": [
+    {
+      "source": "/api/paas/v4/:match*",
+      "destination": "https://open.bigmodel.cn/api/paas/v4/:match*"
+    }
+  ]
+}
+
