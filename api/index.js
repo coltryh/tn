@@ -1,8 +1,10 @@
+// 文件: api/index.js (这是给 Vercel 用的)
 export const config = {
-  runtime: 'edge',
+  runtime: 'edge', // 🔥 关键：开启 Edge 模式，解除 10 秒超时限制
 };
 
 export default async function handler(request) {
+  // 处理 CORS 预检
   if (request.method === 'OPTIONS') {
     return new Response(null, {
       status: 200,
@@ -15,38 +17,36 @@ export default async function handler(request) {
   }
 
   try {
-    // 1. 你的智谱 Key
+    // 你的智谱 Key
     const API_KEY = "1efd5a531e264686a78cb9af688a4916.zJegTzxa61V0EsIe";
 
-    // 2. 获取 Claude 发来的原始请求
     const body = await request.json();
+    
+    // 强制开启流式，让它一个字一个字蹦，防止超时
+    body.stream = true;
 
-    // 3. 🚨 关键修改：转发给智谱的 Anthropic 兼容接口
-    // 注意：这里必须用 api/anthropic/v1/messages
+    // 转发给智谱
     const zhipuResponse = await fetch('https://open.bigmodel.cn/api/anthropic/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': API_KEY,      // Anthropic 标准是用 x-api-key
-        'anthropic-version': '2023-06-01' // 必须假装是这个版本
+        'x-api-key': API_KEY,
+        'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify(body)
     });
 
-    // 4. 处理流式响应 (哪怕不流式，原样返回也更稳)
-    const data = await zhipuResponse.text();
-    
-    return new Response(data, {
-      headers: { 
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
+    // 🔥 关键：直接把水管接通 (透传)
+    return new Response(zhipuResponse.body, {
+      status: zhipuResponse.status,
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Access-Control-Allow-Origin': '*',
+        'Connection': 'keep-alive'
       }
     });
 
   } catch (e) {
-    return new Response(JSON.stringify({ error: e.message }), { 
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    return new Response(JSON.stringify({ error: e.message }), { status: 500 });
   }
 }
