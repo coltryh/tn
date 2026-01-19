@@ -1,0 +1,7 @@
+{ "rewrites": [ 
+  { 
+    "source": "/api/paas/v4/:match*",
+    "destination": "https://open.bigmodel.cn/api/paas/v4/:match*" 
+  }
+]
+}
