@@ -1,10 +1,10 @@
-// 文件: api/index.js (这是给 Vercel 用的)
+// 文件: api/index.js (GitHub/Vercel 端)
 export const config = {
-  runtime: 'edge', // 🔥 关键：开启 Edge 模式，解除 10 秒超时限制
+  runtime: 'edge', // 保持 Edge 模式防超时
 };
 
 export default async function handler(request) {
-  // 处理 CORS 预检
+  // CORS 预检
   if (request.method === 'OPTIONS') {
     return new Response(null, {
       status: 200,
@@ -17,28 +17,31 @@ export default async function handler(request) {
   }
 
   try {
-    // 你的智谱 Key
-    const API_KEY = "1efd5a531e264686a78cb9af688a4916.zJegTzxa61V0EsIe";
+    // 1. 你的新 Minimax Key
+    const API_KEY = "sk-cp-ci7wMCIWzMmkymTp0VdexCloEVWjevQZ-OqJzHzpcMPfYMPbRWHUzP50_QbSREsD7UTszpw4O1fEMU8T2-qaORrvGdnr7f-La3dJ7Qd7uw85sxgk349JAl0";
 
     const body = await request.json();
     
-    // 强制开启流式，让它一个字一个字蹦，防止超时
+    // 强制开启流式
     body.stream = true;
 
-    // 转发给智谱
-    const zhipuResponse = await fetch('https://open.bigmodel.cn/api/anthropic/v1/messages', {
+    // 2. 关键修改：转发给 Minimax 的 Anthropic 兼容接口
+    // Minimax 2.5 官方兼容地址：https://api.minimax.io/anthropic/v1/messages
+    const minimaxResponse = await fetch('https://api.minimax.io/anthropic/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        // Minimax 同时也支持标准 Bearer 认证，双管齐下最稳
+        'Authorization': `Bearer ${API_KEY}`,
         'x-api-key': API_KEY,
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify(body)
     });
 
-    // 🔥 关键：直接把水管接通 (透传)
-    return new Response(zhipuResponse.body, {
-      status: zhipuResponse.status,
+    // 3. 管道透传
+    return new Response(minimaxResponse.body, {
+      status: minimaxResponse.status,
       headers: {
         'Content-Type': 'text/event-stream',
         'Access-Control-Allow-Origin': '*',
