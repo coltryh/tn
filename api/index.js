@@ -1,69 +1,61 @@
-// 文件: proxy.js (Minimax Coding Plan 本地版)
-const http = require('http');
+// 文件: api/index.js (Minimax Coding Plan 官方专用版)
+export const config = { runtime: 'edge' };
 
-// 1. 忽略证书错误 (绕过 Zscaler)
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+export default async function handler(req) {
+  // CORS 预检
+  if (req.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': '*'
+      }
+    });
+  }
 
-// 2. Vercel 地址
-const VERCEL_URL = 'https://api.ryhcolt.online/api'; 
+  try {
+    // 1. 你的 Minimax Coding Plan Key (sk-cp 开头)
+    const API_KEY = "sk-cp-ci7wMCIWzMmkymTp0VdexCloEVWjevQZ-OqJzHzpcMPfYMPbRWHUzP50_QbSREsD7UTszpw4O1fEMU8T2-qaORrvGdnr7f-La3dJ7Qd7uw85sxgk349JAl0";
+    
+    // 2. 目标地址：Minimax 官方 Anthropic 兼容接口 (国内节点)
+    // 注意：Coding Plan 必须走这个兼容接口，且国内用户推荐用 minimaxi.com
+    const TARGET_URL = "https://api.minimaxi.com/anthropic/v1/messages";
 
-// 3. 🔥 强制指定模型：Coding Plan 只能用这个名字，不能改！
-const FORCE_MODEL = 'MiniMax-M2.5'; 
+    const claudeBody = await req.json();
 
-const server = http.createServer(async (req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', '*');
+    // 3. 直接转发请求 (因为 Minimax 官方支持 Anthropic 协议)
+    // 我们只需要把 Key 塞进正确的 Header 里
+    const upstreamResp = await fetch(TARGET_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': API_KEY,           // Anthropic 标准鉴权头
+        'anthropic-version': '2023-06-01', // 必须带上版本号
+        'Authorization': `Bearer ${API_KEY}` // 双重保险，有些网关认这个
+      },
+      body: JSON.stringify({
+        ...claudeBody,
+        stream: true // 强制流式
+      })
+    });
 
-    if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
-
-    if (req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => body += chunk);
-        req.on('end', async () => {
-            try {
-                const originalRequest = JSON.parse(body);
-                
-                console.log(`🔌 拦截请求 -> 🚀 转发 Minimax Coding Plan (${FORCE_MODEL})`);
-
-                // 强制流式 + 换模型
-                originalRequest.stream = true; 
-                originalRequest.model = FORCE_MODEL;
-
-                const vercelResp = await fetch(VERCEL_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'User-Agent': 'curl/7.68.0' },
-                    body: JSON.stringify(originalRequest)
-                });
-
-                if (!vercelResp.ok) {
-                    const errText = await vercelResp.text();
-                    console.error(`❌ 上游报错:`, errText);
-                    res.writeHead(vercelResp.status, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ error: errText }));
-                    return;
-                }
-
-                res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
-
-                const reader = vercelResp.body.getReader();
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    res.write(value);
-                }
-                res.end();
-                console.log("✅ 传输完成");
-
-            } catch (error) { if (!res.headersSent) res.end(); }
-        });
+    if (!upstreamResp.ok) {
+      const err = await upstreamResp.text();
+      return new Response(`Minimax Error: ${err}`, { status: upstreamResp.status });
     }
-});
 
-server.listen(3000, () => {
-    console.log('-------------------------------------------');
-    console.log('🚀 Minimax Coding Plan 基站已启动！');
-    console.log(`🔑 密钥前缀: sk-cp- (已确认)`);
-    console.log(`🤖 锁定模型: ${FORCE_MODEL}`);
-    console.log('-------------------------------------------');
-});
+    // 4. 管道透传 (Pipe)
+    // 直接把 Minimax 的流式结果发回给 Claude Code
+    return new Response(upstreamResp.body, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive'
+      }
+    });
+
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), { status: 500 });
+  }
+}
