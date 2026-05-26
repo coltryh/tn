@@ -13,8 +13,7 @@
     }
 
     try {
-      const API_KEY = "sk-cp-JCd4ZdHGYFiFtwEBcxZ_mKjbY3IaXYFszPmrne1Jm7glkcYcB3YVDuTjkDa-HKmzPP6vK__cfG7fS6lwfrJLqmDDHgM
-  6KI0XdHXUmDhfI-8IeibjzZcDXm8";
+      const API_KEY = "sk-cp-JCd4ZdHGYFiFtwEBcxZ_mKjbY3IaXYFszPmrne1Jm7glkcYcB3YVDuTjkDa-HKmzPP6vK__cfG7fS6lwfrJLqmDDHgM6KI0XdHXUmDhfI-8IeibjzZcDXm8";
       const TARGET_URL = "https://api.minimaxi.com/anthropic/v1/messages";
 
       const claudeBody = await req.json();
