@@ -1,4 +1,4 @@
- export const config = { runtime: 'edge' };
+  export const config = { runtime: 'edge' };
 
   export default async function handler(req) {
     if (req.method === 'OPTIONS') {
@@ -19,33 +19,18 @@
 
       const claudeBody = await req.json();
 
-      // === 优化1: 不强制流式，让请求类型自己决定 ===
-      const upstreamBody = {
-        ...claudeBody,
-        // 如果客户端没指定 stream，默认用客户端的值
-        // stream: true // 删除这行！让请求自己决定
-      };
-
-      // === 优化2: 只转发必要 headers，添加调试标记 ===
-      const upstreamHeaders = {
-        'Content-Type': 'application/json',
-        'x-api-key': API_KEY,
-        'anthropic-version': '2023-06-01',
-        'Authorization': `Bearer ${API_KEY}`,
-        // 转发客户端的调试头（如果有的话）
-        ...(req.headers.get('anthropic-dangerous-direct-sse') && {
-          'anthropic-dangerous-direct-sse': 'true'
-        })
-      };
-
-      // === 优化3: 添加超时控制 ===
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 60000); // 60s超时
+      const timeout = setTimeout(() => controller.abort(), 120000); // 增加到120秒
 
       const upstreamResp = await fetch(TARGET_URL, {
         method: 'POST',
-        headers: upstreamHeaders,
-        body: JSON.stringify(upstreamBody),
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': API_KEY,
+          'anthropic-version': '2023-06-01',
+          'Authorization': `Bearer ${API_KEY}`,
+        },
+        body: JSON.stringify(claudeBody),
         signal: controller.signal
       });
 
@@ -53,42 +38,48 @@
 
       if (!upstreamResp.ok) {
         const err = await upstreamResp.text();
-        return new Response(`Minimax Error: ${err}`, {
+        return new Response(`Minimax Error: ${upstreamResp.status} - ${err}`, {
           status: upstreamResp.status,
           headers: { 'Content-Type': 'text/plain' }
         });
       }
 
-      // === 优化4: 根据实际内容类型决定响应方式 ===
+      // 先读取完整 body，检查是否为空
+      const fullBody = await upstreamResp.text();
+
+      // 检查空响应
+      if (!fullBody || fullBody.trim() === '') {
+        return new Response(JSON.stringify({ error: 'upstream returned empty body' }), {
+          status: 502,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
       const contentType = upstreamResp.headers.get('content-type') || '';
 
       if (contentType.includes('text/event-stream')) {
-        // 流式响应（SSE）- 用于文本补全
-        return new Response(upstreamResp.body, {
+        // 流式响应
+        return new Response(fullBody, {
           headers: {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
             'Connection': 'keep-alive',
-            'X-Proxy': 'minimax-edge-v2' // 调试标记
           }
         });
       } else {
-        // 非流式响应 - 用于图片等多模态内容
-        // 直接返回上游响应体
-        const data = await upstreamResp.json();
-        return new Response(JSON.stringify(data), {
+        // 非流式 JSON 响应
+        return new Response(fullBody, {
           headers: {
             'Content-Type': 'application/json',
-            'X-Proxy': 'minimax-edge-v2'
           }
         });
       }
 
     } catch (e) {
-      console.error('[Minimax Proxy Error]', e.message);
+      console.error('[Minimax Proxy Error]', e.message, e.stack);
       return new Response(JSON.stringify({
         error: e.message,
-        type: e.name === 'AbortError' ? 'timeout' : 'upstream_error'
+        type: e.name === 'AbortError' ? 'timeout' : 'unknown_error'
       }), { status: 500 });
     }
   }
