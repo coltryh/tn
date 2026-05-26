@@ -1,61 +1,94 @@
-// 文件: api/index.js (Minimax Coding Plan 官方专用版)
-export const config = { runtime: 'edge' };
+ export const config = { runtime: 'edge' };
 
-export default async function handler(req) {
-  // CORS 预检
-  if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 200,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': '*'
-      }
-    });
-  }
-
-  try {
-    // 1. 你的 Minimax Coding Plan Key (sk-cp 开头)
-    const API_KEY = "sk-cp-JCd4ZdHGYFiFtwEBcxZ_mKjbY3IaXYFszPmrne1Jm7glkcYcB3YVDuTjkDa-HKmzPP6vK__cfG7fS6lwfrJLqmDDHgM6KI0XdHXUmDhfI-8IeibjzZcDXm8";
-    
-    // 2. 目标地址：Minimax 官方 Anthropic 兼容接口 (国内节点)
-    // 注意：Coding Plan 必须走这个兼容接口，且国内用户推荐用 minimaxi.com
-    const TARGET_URL = "https://api.minimaxi.com/anthropic/v1/messages";
-
-    const claudeBody = await req.json();
-
-    // 3. 直接转发请求 (因为 Minimax 官方支持 Anthropic 协议)
-    // 我们只需要把 Key 塞进正确的 Header 里
-    const upstreamResp = await fetch(TARGET_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': API_KEY,           // Anthropic 标准鉴权头
-        'anthropic-version': '2023-06-01', // 必须带上版本号
-        'Authorization': `Bearer ${API_KEY}` // 双重保险，有些网关认这个
-      },
-      body: JSON.stringify({
-        ...claudeBody,
-        stream: true // 强制流式
-      })
-    });
-
-    if (!upstreamResp.ok) {
-      const err = await upstreamResp.text();
-      return new Response(`Minimax Error: ${err}`, { status: upstreamResp.status });
+  export default async function handler(req) {
+    if (req.method === 'OPTIONS') {
+      return new Response(null, {
+        status: 200,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': '*'
+        }
+      });
     }
 
-    // 4. 管道透传 (Pipe)
-    // 直接把 Minimax 的流式结果发回给 Claude Code
-    return new Response(upstreamResp.body, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive'
-      }
-    });
+    try {
+      const API_KEY = "sk-cp-JCd4ZdHGYFiFtwEBcxZ_mKjbY3IaXYFszPmrne1Jm7glkcYcB3YVDuTjkDa-HKmzPP6vK__cfG7fS6lwfrJLqmDDHgM
+  6KI0XdHXUmDhfI-8IeibjzZcDXm8";
+      const TARGET_URL = "https://api.minimaxi.com/anthropic/v1/messages";
 
-  } catch (e) {
-    return new Response(JSON.stringify({ error: e.message }), { status: 500 });
+      const claudeBody = await req.json();
+
+      // === 优化1: 不强制流式，让请求类型自己决定 ===
+      const upstreamBody = {
+        ...claudeBody,
+        // 如果客户端没指定 stream，默认用客户端的值
+        // stream: true // 删除这行！让请求自己决定
+      };
+
+      // === 优化2: 只转发必要 headers，添加调试标记 ===
+      const upstreamHeaders = {
+        'Content-Type': 'application/json',
+        'x-api-key': API_KEY,
+        'anthropic-version': '2023-06-01',
+        'Authorization': `Bearer ${API_KEY}`,
+        // 转发客户端的调试头（如果有的话）
+        ...(req.headers.get('anthropic-dangerous-direct-sse') && {
+          'anthropic-dangerous-direct-sse': 'true'
+        })
+      };
+
+      // === 优化3: 添加超时控制 ===
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60000); // 60s超时
+
+      const upstreamResp = await fetch(TARGET_URL, {
+        method: 'POST',
+        headers: upstreamHeaders,
+        body: JSON.stringify(upstreamBody),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeout);
+
+      if (!upstreamResp.ok) {
+        const err = await upstreamResp.text();
+        return new Response(`Minimax Error: ${err}`, {
+          status: upstreamResp.status,
+          headers: { 'Content-Type': 'text/plain' }
+        });
+      }
+
+      // === 优化4: 根据实际内容类型决定响应方式 ===
+      const contentType = upstreamResp.headers.get('content-type') || '';
+
+      if (contentType.includes('text/event-stream')) {
+        // 流式响应（SSE）- 用于文本补全
+        return new Response(upstreamResp.body, {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Proxy': 'minimax-edge-v2' // 调试标记
+          }
+        });
+      } else {
+        // 非流式响应 - 用于图片等多模态内容
+        // 直接返回上游响应体
+        const data = await upstreamResp.json();
+        return new Response(JSON.stringify(data), {
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Proxy': 'minimax-edge-v2'
+          }
+        });
+      }
+
+    } catch (e) {
+      console.error('[Minimax Proxy Error]', e.message);
+      return new Response(JSON.stringify({
+        error: e.message,
+        type: e.name === 'AbortError' ? 'timeout' : 'upstream_error'
+      }), { status: 500 });
+    }
   }
-}
