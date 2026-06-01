@@ -16,7 +16,7 @@ export default async function handler(req) {
 
   try {
     // 1. 你的 Minimax Coding Plan Key
-    const API_KEY = "sk-cp-ci7wMCIWzMmkymTp0VdexCloEVWjevQZ-OqJzHzpcMPfYMPbRWHUzP50_QbSREsD7UTszpw4O1fEMU8T2-qaORrvGdnr7f-La3dJ7Qd7uw85sxgk349JAl0";
+    const API_KEY = "sk-cp-JCd4ZdHGYFiFtwEBcxZ_mKjbY3IaXYFszPmrne1Jm7glkcYcB3YVDuTjkDa-HKmzPP6vK__cfG7fS6lwfrJLqmDDHgM6KI0XdHXUmDhfI-8IeibjzZcDXm8";
 
     // 2. 目标地址：Minimax 官方 Anthropic 兼容接口
     const TARGET_URL = "https://api.minimaxi.com/anthropic/v1/messages";
