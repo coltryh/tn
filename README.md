@@ -1,16 +1,19 @@
-// 文件: proxy.js (Minimax Coding Plan 本地版)
+
+// 文件: proxy.js (抛弃 Vercel，本地直连 Minimax 终极版)
 const http = require('http');
 
-// 1. 忽略证书错误 (绕过 Zscaler)
+// 1. 核心魔法：无视公司 Zscaler 证书拦截
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
-// 2. Vercel 地址
-const VERCEL_URL = 'https://api.ryhcolt.online/api'; 
+// 2. 你的 Minimax Key
+const API_KEY = "sk-cp-ci7wMCIWzMmkymTp0VdexCloEVWjevQZ-OqJzHzpcMPfYMPbRWHUzP50_QbSREsD7UTszpw4O1fEMU8T2-qaORrvGdnr7f-La3dJ7Qd7uw85sxgk349JAl0";
 
-// 3. 🔥 强制指定模型：Coding Plan 只能用这个名字，不能改！
-const FORCE_MODEL = 'MiniMax-M2.5'; 
+// 3. Minimax 官方接口与模型
+const TARGET_URL = 'https://api.minimaxi.com/anthropic/v1/messages';
+const FORCE_MODEL = 'MiniMax-M2.7'; // 建议用 M2.7，最稳定
 
 const server = http.createServer(async (req, res) => {
+    // 允许跨域
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', '*');
@@ -24,46 +27,60 @@ const server = http.createServer(async (req, res) => {
             try {
                 const originalRequest = JSON.parse(body);
                 
-                console.log(`🔌 拦截请求 -> 🚀 转发 Minimax Coding Plan (${FORCE_MODEL})`);
-
-                // 强制流式 + 换模型
+                // 强制接管模型并开启流式
                 originalRequest.stream = true; 
                 originalRequest.model = FORCE_MODEL;
 
-                const vercelResp = await fetch(VERCEL_URL, {
+                console.log(`🚀 直连 Minimax (${FORCE_MODEL})... 正在耐心等待思考...`);
+
+                // 重点：直接从你本地发请求给 Minimax，不再绕道 Vercel！
+                const minimaxResp = await fetch(TARGET_URL, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'User-Agent': 'curl/7.68.0' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': API_KEY,
+                        'anthropic-version': '2023-06-01'
+                    },
                     body: JSON.stringify(originalRequest)
                 });
 
-                if (!vercelResp.ok) {
-                    const errText = await vercelResp.text();
-                    console.error(`❌ 上游报错:`, errText);
-                    res.writeHead(vercelResp.status, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ error: errText }));
+                if (!minimaxResp.ok) {
+                    const errText = await minimaxResp.text();
+                    console.error(`❌ Minimax 报错:`, errText);
+                    if (!res.headersSent) {
+                        res.writeHead(minimaxResp.status, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: errText }));
+                    }
                     return;
                 }
 
-                res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
+                // 建立超长待机管道
+                res.writeHead(200, {
+                    'Content-Type': 'text/event-stream; charset=utf-8',
+                    'Cache-Control': 'no-cache, no-transform',
+                    'Connection': 'keep-alive'
+                });
 
-                const reader = vercelResp.body.getReader();
+                const reader = minimaxResp.body.getReader();
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) break;
                     res.write(value);
                 }
                 res.end();
-                console.log("✅ 传输完成");
+                console.log("✅ 单次流式传输完美结束");
 
-            } catch (error) { if (!res.headersSent) res.end(); }
+            } catch (error) { 
+                console.error('❌ 本地代理错误:', error.message);
+                if (!res.headersSent) res.end(); 
+            }
         });
     }
 });
 
 server.listen(3000, () => {
     console.log('-------------------------------------------');
-    console.log('🚀 Minimax Coding Plan 基站已启动！');
-    console.log(`🔑 密钥前缀: sk-cp- (已确认)`);
+    console.log('🚀 终极无中间商直连版基站已启动！');
     console.log(`🤖 锁定模型: ${FORCE_MODEL}`);
     console.log('-------------------------------------------');
 });
